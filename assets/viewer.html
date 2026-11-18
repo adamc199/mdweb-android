@@ -17,6 +17,18 @@ table{border-collapse:collapse;display:block;overflow-x:auto}
 td,th{border:1px solid rgba(128,128,128,.4);padding:4px 8px}
 .center{text-align:center}
 .picture{display:flex;min-height:80vh;align-items:center;justify-content:center}
+/* the river of news */
+.rhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+.rhead h1{margin:0;flex:1;font-size:1.4em}
+.rhead small{opacity:.65;width:100%}
+.rfeed{margin:18px 0 4px;font-size:.8em;font-weight:bold;letter-spacing:.04em;text-transform:uppercase;opacity:.75}
+.ritem{padding:8px 0 10px;border-bottom:1px solid rgba(128,128,128,.25)}
+.ritem a.rt{font-weight:bold;text-decoration:none}
+.ritem .rs{margin:4px 0 6px;font-size:.92em;line-height:1.45}
+.ritem .rm{display:flex;align-items:center;gap:8px;font-size:.78em;opacity:.85}
+.ritem .rm span{flex:1;opacity:.75}
+.rbtn{font:inherit;font-size:.85em;padding:5px 10px;border-radius:6px;border:1px solid rgba(128,128,128,.5);background:transparent;color:inherit}
+.rempty{opacity:.75;line-height:1.5}
 </style>
 <style id="theme">%%CSS%%</style>
 %%USERCSS%%
@@ -59,6 +71,38 @@ td,th{border:1px solid rgba(128,128,128,.4);padding:4px 8px}
         if (p && p.className === 'solo') p.parentNode.removeChild(p); else im.parentNode.removeChild(im);
       });
     });
+  } else if (D.mode === 'river') {
+    // the river of news: newest first, runs of items from the same feed under its name
+    var ago = function(t){ var m = Math.round((Date.now() - t) / 60000);
+      return m < 1 ? 'now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
+    var h = '<div class="rhead"><h1>River of news</h1><button class="rbtn" id="rref">↻ Refresh</button><button class="rbtn" id="rfeeds">Feeds</button>'
+      + '<small>' + D.feeds + (D.feeds === 1 ? ' feed' : ' feeds') + (D.updated ? ' · read ' + ago(D.updated) : '') + '</small></div>';
+    if (!D.feeds) h += '<p class="rempty">No feeds yet. When a page has a feed, an orange <b>RSS</b> button shows at the top right: tap it to add the feed here. Or tap <b>Feeds</b> to add one by address.</p>';
+    else if (!D.items.length) h += '<p class="rempty">Reading your feeds…</p>';
+    var last = null;
+    D.items.forEach(function(it, i){
+      if (it.feed !== last) { h += '<div class="rfeed">' + esc(it.feedTitle || it.feed) + '</div>'; last = it.feed; }
+      // a titled item: the title is the link. A title-less one (Scripting News posts): the text is plain text, not a
+      // link (Adam 2026-11-18); Open and Copy link carry the address.
+      h += '<div class="ritem">' + (it.title
+          ? (it.link ? '<a class="rt" href="' + esc(it.link) + '">' + esc(it.title) + '</a>' : '<b>' + esc(it.title) + '</b>')
+            + (it.snippet ? '<div class="rs">' + esc(it.snippet) + '</div>' : '')
+          : '<div class="rs">' + esc(it.snippet) + '</div>')
+        + '<div class="rm"><span>' + ago(it.t) + '</span>'
+        + (!it.title && it.link ? '<button class="rbtn" data-open="' + i + '">Open</button>' : '')
+        + (it.link ? '<button class="rbtn" data-copy="' + i + '">Copy link</button>' : '')
+        + '<button class="rbtn" data-unsub="' + i + '">Unsubscribe</button></div></div>';
+    });
+    page.innerHTML = h;
+    page.addEventListener('click', function(e){
+      var b = e.target.closest ? e.target.closest('button') : null; if (!b) return;
+      e.stopPropagation(); e.preventDefault();
+      if (b.id === 'rref') { App.refreshRiver(); b.textContent = '↻ Reading…'; return; }
+      if (b.id === 'rfeeds') { App.feeds(); return; }
+      if (b.dataset.open != null) { App.open(D.items[+b.dataset.open].link, 'link'); return; }
+      if (b.dataset.copy != null) { App.copy(D.items[+b.dataset.copy].link); b.textContent = 'Copied ✓'; setTimeout(function(){ b.textContent = 'Copy link'; }, 1500); return; }
+      if (b.dataset.unsub != null) { var it = D.items[+b.dataset.unsub]; App.unsubscribe(it.feed, it.feedTitle || it.feed); }
+    }, true);
   } else if (D.mode === 'image') {
     page.innerHTML = '<div class="picture"><img src="' + esc(D.url) + '"></div>';
   } else if (D.mode === 'download') {

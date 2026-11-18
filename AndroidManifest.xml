@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="fm.curry.mdweb" android:versionCode="3" android:versionName="1.2">
+    package="fm.curry.mdweb" android:versionCode="6" android:versionName="1.4.1">
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <application android:label="MD Web" android:icon="@drawable/ic_launcher"
@@ -17,8 +17,32 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="https" android:host="*" android:pathPattern=".*\\.md"/>
-                <data android:scheme="http" android:host="*" android:pathPattern=".*\\.md"/>
+                <data android:scheme="https"/>
+                <data android:scheme="http"/>
+                <data android:host="*"/>
+                <!-- Android's pathPattern stops at the first match of ".", so addresses with dots before .md need these too -->
+                <data android:pathPattern=".*\\.md"/>
+                <data android:pathPattern=".*\\..*\\.md"/>
+                <data android:pathPattern=".*\\..*\\..*\\.md"/>
+                <data android:pathPattern=".*\\.markdown"/>
+            </intent-filter>
+            <!-- Markdown FILES (2026-11-18, Adam: "opens all markdown files that I click on in Brave"): a .md the browser
+                 downloaded and the user taps Open, or any .md in Files / Downloads / a chat app -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="content"/>
+                <data android:scheme="file"/>
+                <data android:mimeType="text/markdown"/>
+                <data android:mimeType="text/x-markdown"/>
+                <data android:mimeType="text/x-web-markdown"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/markdown"/>
+                <data android:mimeType="text/x-markdown"/>
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND"/>

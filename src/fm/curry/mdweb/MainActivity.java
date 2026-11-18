@@ -73,6 +73,7 @@ import java.util.regex.Pattern;
 public class MainActivity extends Activity {
 
     static final String HOME = "mdweb:home";
+    static final String RIVER = "mdweb:river";      // the river of news (River.java)
     static final String ACCEPT = "text/markdown, text/x-opml";
     static final String UA = "MDWeb/1.0 (Android; Markdown web reader)";
     static final String[] STYLES = {"Reader", "Newsprint", "Classic", "Mono", "Book"};
@@ -87,7 +88,8 @@ public class MainActivity extends Activity {
     EditText address, findText;
     FrameLayout webHolder;
     LinearLayout arrows;
-    Button prevBtn, nextBtn, calBtn;
+    Button prevBtn, nextBtn, calBtn, rssBtn;
+    River river;
     ProgressBar progress;
 
     final ArrayList<Tab> tabs = new ArrayList<>();
@@ -111,6 +113,7 @@ public class MainActivity extends Activity {
         String title;
         Map<String, String> front = new HashMap<>();
         String prev, next, socket, search, mirror, siteBase, tocUrl;
+        List<String[]> feeds = new ArrayList<>();   // {url, title} of the feeds this page or its site offers
         long size;
     }
 
@@ -141,9 +144,38 @@ public class MainActivity extends Activity {
             Arrays.sort(files);
             for (String f : files) styleCss.put(f.replaceAll("^\\d+-|\\.css$", ""), asset("styles/" + f));
         } catch (Exception e) { /* no styles: base layout only */ }
+        river = new River(prefs, getFilesDir());
         buildUi();
         restoreTabs();
+        ui.postDelayed(riverTick, 15 * 60_000L);
         handleIntent(getIntent());
+    }
+
+    /** every 15 minutes while the app is open: read the feeds; an open River tab shows the new items */
+    final Runnable riverTick = new Runnable() {
+        public void run() { refreshRiver(false); ui.postDelayed(this, 15 * 60_000L); }
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (river != null && river.stale()) refreshRiver(false);
+    }
+
+    void refreshRiver(boolean force) {
+        if (river.subs().length() == 0) return;
+        if (!force && !river.stale()) return;
+        boolean shown = false;
+        for (Tab t : tabs) if (RIVER.equals(t.url())) shown = true;
+        if (shown && active != null && RIVER.equals(active.url())) progress.setVisibility(View.VISIBLE);
+        pool.execute(() -> {
+            river.refresh();
+            ui.post(() -> {
+                progress.setVisibility(View.INVISIBLE);
+                for (Tab t : tabs) if (RIVER.equals(t.url()) && t.page != null) render(t, t.web.getScrollY());
+                if (force && !river.lastErrors.isEmpty()) toast("Some feeds didn't come:\n" + river.lastErrors);
+            });
+        });
     }
 
     @Override
@@ -157,6 +189,8 @@ public class MainActivity extends Activity {
         if (i == null) return;
         String u = null;
         if (Intent.ACTION_VIEW.equals(i.getAction()) && i.getData() != null) u = i.getData().toString();
+        else if (Intent.ACTION_SEND.equals(i.getAction()) && i.getParcelableExtra(Intent.EXTRA_STREAM) != null)
+            u = i.getParcelableExtra(Intent.EXTRA_STREAM).toString();          // a .md file shared to MD Web
         else if (Intent.ACTION_SEND.equals(i.getAction())) {
             String t = i.getStringExtra(Intent.EXTRA_TEXT);
             Matcher m = Pattern.compile("https?://\\S+").matcher(t == null ? "" : t);
@@ -257,6 +291,16 @@ public class MainActivity extends Activity {
         calBtn = smallButton("📅", v -> calendarDialog());     // the site's calendar, one tap (Adam: it was hidden in ⋮)
         calBtn.setTextSize(20);
         arrows.addView(calBtn, 0);
+        rssBtn = smallButton("RSS", v -> rssDialog());      // a feed was found on this page or its site: one tap subscribes
+        rssBtn.setTextSize(13);
+        rssBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        rssBtn.setTextColor(Color.WHITE);
+        android.graphics.drawable.GradientDrawable og = new android.graphics.drawable.GradientDrawable();
+        og.setColor(0xFFEE802F); og.setCornerRadius(dp(5));
+        rssBtn.setBackground(og);
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rp.setMargins(dp(4), dp(4), dp(4), dp(4)); rp.gravity = Gravity.CENTER_VERTICAL;
+        arrows.addView(rssBtn, 0, rp);
         arrows.setVisibility(View.GONE);
         FrameLayout.LayoutParams ap = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
         ap.setMargins(0, dp(6), dp(6), 0);
@@ -343,7 +387,7 @@ public class MainActivity extends Activity {
     void showAddress(Tab t) {
         if (t != active) return;
         String u = t.url();
-        address.setText(HOME.equals(u) ? "" : u);
+        address.setText(HOME.equals(u) || RIVER.equals(u) ? "" : u);
     }
 
     void showArrows() {
@@ -351,7 +395,14 @@ public class MainActivity extends Activity {
         boolean ok = p != null && !active.showingSource;
         boolean nav = ok && (p.prev != null || p.next != null);
         boolean cal = ok && !calendarMonths().isEmpty();
-        arrows.setVisibility(nav || cal ? View.VISIBLE : View.GONE);
+        boolean rss = ok && !p.feeds.isEmpty();
+        arrows.setVisibility(nav || cal || rss ? View.VISIBLE : View.GONE);
+        rssBtn.setVisibility(rss ? View.VISIBLE : View.GONE);
+        if (rss) {
+            boolean all = true;
+            for (String[] f : p.feeds) if (!river.subscribed(f[0])) all = false;
+            rssBtn.setText(all ? "RSS ✓" : "RSS");
+        }
         prevBtn.setVisibility(nav ? View.VISIBLE : View.GONE);
         nextBtn.setVisibility(nav ? View.VISIBLE : View.GONE);
         calBtn.setVisibility(cal ? View.VISIBLE : View.GONE);
@@ -404,6 +455,15 @@ public class MainActivity extends Activity {
 
     /** how: typed | link | history | reload | update | download */
     void go(Tab t, String url, String how, boolean pushIt) {
+        if (RIVER.equals(url)) {
+            Page p = new Page();
+            p.mode = "river"; p.url = p.finalUrl = RIVER; p.title = "📰 River";
+            if (pushIt) push(t, url);
+            t.page = p; t.showingSource = false;
+            render(t);
+            refreshRiver("reload".equals(how));
+            return;
+        }
         if (HOME.equals(url)) {
             Page p = new Page();
             p.mode = "markdown"; p.url = p.finalUrl = HOME; p.raw = p.text = asset("home.md"); p.title = "MD Web";
@@ -413,6 +473,7 @@ public class MainActivity extends Activity {
             return;
         }
         String scheme = Uri.parse(url).getScheme();
+        if ("content".equalsIgnoreCase(scheme) || "file".equalsIgnoreCase(scheme)) { openLocal(t, url, pushIt); return; }
         if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
             external(url);
             return;
@@ -459,6 +520,41 @@ public class MainActivity extends Activity {
                 if (t == active) progress.setVisibility(View.INVISIBLE);
                 addHistory(page);
                 if ("markdown".equals(page.mode)) siteInfo(t, my, page);
+            });
+        });
+    }
+
+    /** A Markdown file on the phone (a browser download, Files, a chat app): read it through the app that handed it over. */
+    void openLocal(Tab t, String url, boolean pushIt) {
+        final int my = ++t.seq;
+        if (t == active) progress.setVisibility(View.VISIBLE);
+        pool.execute(() -> {
+            Page p = new Page();
+            try {
+                Uri u = Uri.parse(url);
+                byte[] b;
+                try (InputStream in = getContentResolver().openInputStream(u)) { b = readAll(in, MAX_BYTES); }
+                String name = null;
+                try (android.database.Cursor c = getContentResolver().query(u, new String[]{android.provider.OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                    if (c != null && c.moveToFirst()) name = c.getString(0);
+                } catch (Exception ignored) { }
+                if (name == null) name = lastSegment(url);
+                String mime = getContentResolver().getType(u);
+                String low = name.toLowerCase(Locale.US);
+                boolean md = low.endsWith(".md") || low.endsWith(".markdown") || (mime != null && mime.contains("markdown"));
+                p.url = p.finalUrl = url; p.size = b.length; p.title = name;
+                p.raw = new String(b, StandardCharsets.UTF_8);
+                if (md) { p.mode = "markdown"; frontMatter(p); } else { p.mode = "text"; p.text = p.raw; }
+            } catch (Exception e) {
+                fail(t, my, url, "Couldn't open the file: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
+                return;
+            }
+            ui.post(() -> {
+                if (t.seq != my) return;
+                if (pushIt) push(t, url);
+                t.page = p; t.showingSource = false;
+                render(t);
+                if (t == active) progress.setVisibility(View.INVISIBLE);
             });
         });
     }
@@ -548,10 +644,15 @@ public class MainActivity extends Activity {
             int end = -1;
             for (int i = 1; i < lines.length; i++) if (lines[i].trim().equals("---") || lines[i].trim().equals("...")) { end = i; break; }
             if (end > 0) {
+                String parent = null;                      // one level of nesting: "source:\n  url: ..." -> source.url
                 for (int i = 1; i < end; i++) {
                     int c = lines[i].indexOf(':');
-                    if (c <= 0 || Character.isWhitespace(lines[i].charAt(0))) continue;
+                    if (c <= 0) continue;
+                    boolean nested = Character.isWhitespace(lines[i].charAt(0));
+                    if (nested && parent == null) continue;
                     String k = lines[i].substring(0, c).trim(), v = lines[i].substring(c + 1).trim();
+                    if (!nested) parent = v.isEmpty() ? k : null;
+                    else k = parent + "." + k;
                     if (v.length() >= 2 && ((v.startsWith("\"") && v.endsWith("\"")) || (v.startsWith("'") && v.endsWith("'"))))
                         v = v.substring(1, v.length() - 1);
                     p.front.put(k, v);
@@ -591,6 +692,7 @@ public class MainActivity extends Activity {
                 p.siteBase = info.optString("_base", null);
             }
             p.tocUrl = findTocUrl(p.finalUrl);
+            p.feeds = discoverFeeds(p, info);
             if (p.prev == null && p.next == null) {
                 List<String> toc = p.tocUrl == null ? null : loadToc(p.tocUrl, 0);
                 if (toc != null) {
@@ -614,6 +716,125 @@ public class MainActivity extends Activity {
                 if (p.socket != null) t.web.evaluateJavascript("window.startWatch && startWatch(" + JSONObject.quote(p.socket) + ")", null);
             });
         });
+    }
+
+    final Map<String, String> feedCheck = new HashMap<>();   // url -> feed title, or "" when it is not a feed
+
+    /** Feeds the page or its site offers: front matter (rss / feed / urlFeed / source.url), bonbon.json (urlFeed / urlRss),
+     *  links in the page that look like feeds, else an rss.xml in the page's folder or one above it. Each one is fetched once
+     *  to be sure it is RSS or Atom. */
+    List<String[]> discoverFeeds(Page p, JSONObject info) {
+        java.util.LinkedHashSet<String> cand = new java.util.LinkedHashSet<>();
+        for (String k : new String[]{"rss", "feed", "urlFeed", "urlRss", "source.url"}) {
+            String v = p.front.get(k);
+            if (v != null && !v.isEmpty()) cand.add(resolve(p.finalUrl, v));
+        }
+        if (info != null) for (String k : new String[]{"urlFeed", "urlRss", "feed", "rss"}) {
+            String v = optUrl(info, k, p.finalUrl);
+            if (v != null) cand.add(v);
+        }
+        Matcher m = Pattern.compile("\\]\\(([^)\\s]+)").matcher(p.text == null ? "" : p.text);
+        while (m.find()) {
+            String u = m.group(1);
+            if (u.matches("(?i).*(/rss|/feed|/atom|rss\\.xml|atom\\.xml|feed\\.xml|\\.rss)/?(\\?.*)?$")) cand.add(resolve(p.finalUrl, u));
+        }
+        List<String[]> out = new ArrayList<>();
+        int checked = 0;
+        for (String u : cand) {
+            if (checked++ >= 6) break;
+            String t = feedTitle(u);
+            if (t != null) out.add(new String[]{u, t});
+        }
+        if (out.isEmpty()) {
+            for (String d : folders(p.finalUrl)) {
+                String t = feedTitle(d + "rss.xml");
+                if (t != null) { out.add(new String[]{d + "rss.xml", t}); break; }
+            }
+        }
+        return out;
+    }
+
+    /** the feed's title if url is RSS / Atom, else null; remembered */
+    String feedTitle(String url) {
+        synchronized (feedCheck) { if (feedCheck.containsKey(url)) { String t = feedCheck.get(url); return t.isEmpty() ? null : t; } }
+        String title = "";
+        try {
+            Resp r = fetch(url, "application/rss+xml, application/atom+xml, application/xml, text/xml");
+            if (r.code == 200) {
+                River.Feed f = River.parse(r.body, r.finalUrl);
+                if (f != null) title = f.title.isEmpty() ? url : f.title;
+            }
+        } catch (Exception ignored) { }
+        synchronized (feedCheck) { feedCheck.put(url, title); }
+        return title.isEmpty() ? null : title;
+    }
+
+    void rssDialog() {
+        Page p = active == null ? null : active.page;
+        if (p == null || p.feeds.isEmpty()) return;
+        if (p.feeds.size() == 1) {
+            String[] f = p.feeds.get(0);
+            if (river.subscribed(f[0])) {
+                new AlertDialog.Builder(this).setTitle(f[1]).setMessage("You are subscribed to this feed.\n" + f[0])
+                        .setPositiveButton("Open the River", (d, w) -> openRiver())
+                        .setNeutralButton("Unsubscribe", (d, w) -> { river.unsubscribe(f[0]); showArrows(); rerenderRivers(); })
+                        .setNegativeButton("Close", null).show();
+            } else {
+                river.subscribe(f[0], f[1]);
+                toast("Subscribed to " + f[1]);
+                showArrows();
+                refreshRiver(true);
+            }
+            return;
+        }
+        String[] names = new String[p.feeds.size()];
+        for (int i = 0; i < names.length; i++) names[i] = (river.subscribed(p.feeds.get(i)[0]) ? "✓ " : "") + p.feeds.get(i)[1];
+        new AlertDialog.Builder(this).setTitle("Feeds on this page").setItems(names, (d, w) -> {
+            String[] f = p.feeds.get(w);
+            if (river.subscribed(f[0])) { river.unsubscribe(f[0]); toast("Unsubscribed from " + f[1]); rerenderRivers(); }
+            else { river.subscribe(f[0], f[1]); toast("Subscribed to " + f[1]); refreshRiver(true); }
+            showArrows();
+        }).show();
+    }
+
+    void openRiver() {
+        for (Tab t : tabs) if (RIVER.equals(t.url())) { select(t); refreshRiver(false); return; }
+        newTab(RIVER, true);
+    }
+
+    void rerenderRivers() { for (Tab t : tabs) if (RIVER.equals(t.url()) && t.page != null) render(t, t.web.getScrollY()); }
+
+    void feedsDialog() {
+        JSONArray a = river.subs();
+        String[] names = new String[a.length() + 1];
+        names[0] = "＋ Add a feed by address…";
+        for (int i = 0; i < a.length(); i++) names[i + 1] = a.optJSONObject(i).optString("t") + "\n" + a.optJSONObject(i).optString("u");
+        new AlertDialog.Builder(this).setTitle("Your feeds (" + a.length() + ")").setItems(names, (d, w) -> {
+            if (w == 0) { addFeedDialog(); return; }
+            JSONObject o = a.optJSONObject(w - 1);
+            new AlertDialog.Builder(this).setTitle(o.optString("t")).setMessage(o.optString("u"))
+                    .setPositiveButton("Unsubscribe", (d2, w2) -> { river.unsubscribe(o.optString("u")); showArrows(); rerenderRivers(); })
+                    .setNegativeButton("Close", null).show();
+        }).setNeutralButton("Open the River", (d, w) -> openRiver()).show();
+    }
+
+    void addFeedDialog() {
+        EditText e = new EditText(this);
+        e.setSingleLine(true);
+        e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        e.setHint("https://example.com/rss.xml");
+        new AlertDialog.Builder(this).setTitle("Add a feed").setView(e).setPositiveButton("Subscribe", (d, w) -> {
+            String u = e.getText().toString().trim();
+            if (!u.matches("(?i)^https?://.*")) u = "https://" + u;
+            final String url = u;
+            pool.execute(() -> {
+                String t = feedTitle(url);
+                ui.post(() -> {
+                    if (t == null) { toast("That address is not an RSS or Atom feed."); return; }
+                    river.subscribe(url, t); toast("Subscribed to " + t); refreshRiver(true);
+                });
+            });
+        }).setNegativeButton("Cancel", null).show();
     }
 
     static String optUrl(JSONObject o, String k, String base) {
@@ -737,13 +958,18 @@ public class MainActivity extends Activity {
             if (scrollY > 0) d.put("scrollY", scrollY);
             if (!t.showingSource && p.front.get("rightMarginImage") != null) d.put("rightMarginImage", resolve(p.finalUrl, p.front.get("rightMarginImage")));
             if (p.socket != null && !t.showingSource) d.put("socket", p.socket);
+            if ("river".equals(mode)) {
+                d.put("items", river.json(250));
+                d.put("feeds", river.subs().length());
+                d.put("updated", river.lastRefresh);
+            }
             String userCss = prefs.getString("userCss", "");
             String html = template
                     .replace("%%CSS%%", styleCss.getOrDefault(prefs.getString("style", "Reader"), ""))
                     .replace("%%USERCSS%%", userCss.isEmpty() ? "" : "<link rel=\"stylesheet\" href=\"" + userCss.replace("\"", "%22") + "\">")
                     .replace("%%MDIT%%", "markdown".equals(mode) ? mdit : "")
                     .replace("%%DATA%%", d.toString().replace("</", "<\\/"));
-            String base = HOME.equals(p.finalUrl) ? "https://mdweb.invalid/" : p.finalUrl;
+            String base = !p.finalUrl.startsWith("http") ? "https://mdweb.invalid/" : p.finalUrl;
             t.web.loadDataWithBaseURL(base, html, "text/html", "utf-8", null);
         } catch (Exception e) {
             toast("Couldn't show the page: " + e.getMessage());
@@ -805,6 +1031,25 @@ public class MainActivity extends Activity {
         public void open(String url, String kind) { ui.post(() -> go(t, url, "download".equals(kind) ? "download" : "link", true)); }
 
         @JavascriptInterface
+        public void copy(String url) { ui.post(() -> MainActivity.this.copy(url)); }
+
+        @JavascriptInterface
+        public void share(String url) { ui.post(() -> MainActivity.this.share(url)); }
+
+        @JavascriptInterface
+        public void unsubscribe(String feed, String title) {
+            ui.post(() -> new AlertDialog.Builder(MainActivity.this).setTitle("Unsubscribe from " + title + "?").setMessage(feed)
+                    .setPositiveButton("Unsubscribe", (d, w) -> { river.unsubscribe(feed); toast("Unsubscribed from " + title); rerenderRivers(); showArrows(); })
+                    .setNegativeButton("Cancel", null).show());
+        }
+
+        @JavascriptInterface
+        public void refreshRiver() { ui.post(() -> MainActivity.this.refreshRiver(true)); }
+
+        @JavascriptInterface
+        public void feeds() { ui.post(() -> feedsDialog()); }
+
+        @JavascriptInterface
         public void updated(String url) {
             ui.post(() -> {
                 if (t.page != null && url.equals(t.page.finalUrl) && !t.showingSource) go(t, t.url(), "update", false);
@@ -859,9 +1104,9 @@ public class MainActivity extends Activity {
         boolean marked = active != null && isBookmarked(active.url());
         String[] items = {"Home", marked ? "Remove bookmark" : "Add bookmark", "Bookmarks…", "History…", "Find in page",
                 "View source", "Reload", "Open in phone's browser", "Share link", "Your own stylesheet…", "Close tab", "About",
-                "Calendar…"};
+                "Calendar…", "📰 River of news", "Your feeds…"};
         boolean cal = !calendarMonths().isEmpty();
-        for (int i = 0; i < items.length; i++) if (i != 12 || cal) mm.add(0, i, i == 12 ? 2 : i, items[i]);
+        for (int i = 0; i < items.length; i++) if (i != 12 || cal) mm.add(0, i, i == 12 ? 2 : i == 13 ? 1 : i == 14 ? 1 : i, items[i]);
         m.setOnMenuItemClickListener(item -> {
             if (active == null) return true;
             String u = active.url();
@@ -879,6 +1124,8 @@ public class MainActivity extends Activity {
                 case 10: closeTab(active); break;
                 case 11: about(); break;
                 case 12: calendarDialog(); break;
+                case 13: openRiver(); break;
+                case 14: feedsDialog(); break;
             }
             return true;
         });
@@ -886,7 +1133,7 @@ public class MainActivity extends Activity {
     }
 
     void about() {
-        new AlertDialog.Builder(this).setTitle("MD Web 1.2")
+        new AlertDialog.Builder(this).setTitle("MD Web 1.4.1")
                 .setMessage("A reader for the web of Markdown pages, built from the open charter Dave Winer published for BonBon. "
                         + "Pages are Markdown; any HTML in them is thrown away and no page code runs. You choose how pages look.\n\n"
                         + "Markdown rendering: markdown-it 14.1.0 and markdown-it-emoji 2.0.2 (MIT).")
@@ -967,6 +1214,11 @@ public class MainActivity extends Activity {
     void refreshBookmarkBar() {
         seedBookmarks();
         bookmarkBar.removeAllViews();
+        TextView rv = new TextView(this);
+        rv.setText("📰 River"); rv.setTextSize(13); rv.setTypeface(null, Typeface.BOLD);
+        rv.setPadding(dp(10), dp(4), dp(10), dp(6));
+        rv.setOnClickListener(v -> openRiver());
+        bookmarkBar.addView(rv);
         JSONArray a = list("bookmarks");
         for (int i = 0; i < a.length(); i++) {
             JSONObject o = a.optJSONObject(i);
@@ -1098,7 +1350,7 @@ public class MainActivity extends Activity {
 
     void saveTabs() {
         JSONArray a = new JSONArray();
-        for (Tab t : tabs) a.put(t.pendingUrl != null ? t.pendingUrl : t.url());
+        for (Tab t : tabs) { String u = t.pendingUrl != null ? t.pendingUrl : t.url(); if (u.startsWith("http") || HOME.equals(u) || RIVER.equals(u)) a.put(u); }
         prefs.edit().putString("tabs", a.toString()).putInt("activeTab", Math.max(0, tabs.indexOf(active))).apply();
     }
 
@@ -1155,7 +1407,7 @@ public class MainActivity extends Activity {
     }
 
     static class Resp {
-        int code; String message, finalUrl, contentType = "", contentLocation; byte[] body = new byte[0];
+        int code; String message, finalUrl, contentType = "", contentLocation, etag, lastModified; byte[] body = new byte[0];
 
         String type() {
             String t = contentType == null ? "" : contentType;
@@ -1172,7 +1424,9 @@ public class MainActivity extends Activity {
     }
 
     /** GET with the charter's Accept header; follows up to 6 redirects, http and https both. */
-    static Resp fetch(String url, String accept) throws Exception {
+    static Resp fetch(String url, String accept) throws Exception { return fetch(url, accept, null); }
+
+    static Resp fetch(String url, String accept, Map<String, String> headers) throws Exception {
         String cur = url;
         for (int hop = 0; hop < 7; hop++) {
             HttpURLConnection c = (HttpURLConnection) new URL(cur).openConnection();
@@ -1181,6 +1435,7 @@ public class MainActivity extends Activity {
             c.setReadTimeout(30000);
             c.setRequestProperty("Accept", accept);
             c.setRequestProperty("User-Agent", UA);
+            if (headers != null) for (Map.Entry<String, String> e : headers.entrySet()) c.setRequestProperty(e.getKey(), e.getValue());
             int code = c.getResponseCode();
             if (code >= 300 && code < 400 && c.getHeaderField("Location") != null) {
                 cur = new URL(new URL(cur), c.getHeaderField("Location")).toString();
@@ -1193,6 +1448,8 @@ public class MainActivity extends Activity {
             r.finalUrl = cur;
             r.contentType = c.getContentType() == null ? "" : c.getContentType();
             r.contentLocation = c.getHeaderField("Content-Location");
+            r.etag = c.getHeaderField("ETag");
+            r.lastModified = c.getHeaderField("Last-Modified");
             InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
             if (in != null) try (InputStream s = in) { r.body = readAll(s, MAX_BYTES); }
             c.disconnect();

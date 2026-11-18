@@ -23,5 +23,6 @@ Type or paste the address of a Markdown page in the box at the top. Links to Mar
 * A link to a site's HTML version opens its Markdown copy here, when the site has one.
 * One word in the address box (no dot or slash) **searches the site** you are on, if it has a search.
 * Pages on sites that offer it **update by themselves** when the writer changes them.
+* An orange **RSS** button at the top right means the page or its site has a feed: tap it to add the feed to your **📰 River**, the newest items from all your feeds in one list, each with **Copy link** and **Unsubscribe**.
 
 Built on the open Markdown-web format described in the BonBon charter, so the same pages work in BonBon and here.
