@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* base layout shared by every stylesheet */
+html,body{margin:0;padding:0}
+body{padding:18px 18px 60px;overflow-wrap:break-word}
+img{max-width:100%;height:auto}
+p.solo{text-align:center}
+p.solo img{display:block;margin:0 auto}
+p.solo .caption{display:block;font-size:.85em;opacity:.75;margin-top:6px}
+img.lead{float:right;max-width:40%;margin:0 0 8px 12px}
+img.rmargin{float:right;max-width:35%;margin:0 0 10px 14px}
+pre{overflow-x:auto;white-space:pre}
+pre.text{white-space:pre-wrap}
+table{border-collapse:collapse;display:block;overflow-x:auto}
+td,th{border:1px solid rgba(128,128,128,.4);padding:4px 8px}
+.center{text-align:center}
+.picture{display:flex;min-height:80vh;align-items:center;justify-content:center}
+</style>
+<style id="theme">%%CSS%%</style>
+%%USERCSS%%
+</head><body><div id="page"></div>
+<script>%%MDIT%%</script>
+<script>
+(function(){
+  var D = %%DATA%%;
+  var page = document.getElementById('page');
+  function esc(s){return s.replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  if (D.mode === 'markdown') {
+    var md = window.markdownit({html:true, linkify:true, typographer:false});
+    if (window.markdownitEmoji) md.use(window.markdownitEmoji);   // :smile: and friends, as GitHub writes them
+    // HTML in the file is thrown away (charter): drop every html token instead of showing it.
+    md.renderer.rules.html_block = function(){return ''};
+    md.renderer.rules.html_inline = function(){return ''};
+    page.innerHTML = md.render(D.text);
+    // pictures: a paragraph that is only a picture is centered with its alt text as a caption;
+    // a picture at the head of a paragraph that goes on with text floats right.
+    Array.prototype.forEach.call(page.querySelectorAll('p'), function(p){
+      var first = p.firstElementChild;
+      if (!first || first.tagName !== 'IMG') return;
+      var only = p.children.length === 1 && p.textContent.trim() === '';
+      if (only) {
+        p.className = 'solo';
+        var alt = first.getAttribute('alt');
+        if (alt) { var c = document.createElement('span'); c.className='caption'; c.textContent = alt; p.appendChild(c); }
+      } else if (p.firstChild === first) {
+        first.className = 'lead';
+      }
+    });
+    if (D.rightMarginImage) {
+      var im = document.createElement('img'); im.src = D.rightMarginImage; im.className = 'rmargin';
+      page.insertBefore(im, page.firstChild);
+    }
+    // a picture that wasn't allowed (SVG, not a picture at all) or didn't load: hide it and its caption
+    Array.prototype.forEach.call(page.querySelectorAll('img'), function(im){
+      im.addEventListener('error', function(){
+        var p = im.parentNode;
+        if (p && p.className === 'solo') p.parentNode.removeChild(p); else im.parentNode.removeChild(im);
+      });
+    });
+  } else if (D.mode === 'image') {
+    page.innerHTML = '<div class="picture"><img src="' + esc(D.url) + '"></div>';
+  } else if (D.mode === 'download') {
+    page.innerHTML = '<h2>' + esc(D.name) + '</h2><p>' + esc(D.size) + '</p><p><a href="' + esc(D.url) +
+      '" data-download="1">Download</a></p>';
+  } else {
+    page.innerHTML = '<pre class="text">' + esc(D.text) + '</pre>';
+  }
+  // every link click goes to the app, which decides: Markdown here, HTML in the phone's browser.
+  document.addEventListener('click', function(e){
+    var a = e.target.closest ? e.target.closest('a') : null;
+    if (!a || !a.href) return;
+    e.preventDefault();
+    if (a.hash && a.href.split('#')[0] === location.href.split('#')[0]) {
+      var t = document.getElementById(decodeURIComponent(a.hash.slice(1))) || document.getElementsByName(a.hash.slice(1))[0];
+      if (t) t.scrollIntoView(); return;
+    }
+    App.open(a.href, a.getAttribute('data-download') ? 'download' : 'link');
+  }, true);
+  // live update (bonbon.json urlUpdateSocket): send "watch <url>", reload on "update".
+  // The app calls startWatch() once it has read the site's bonbon.json (after the page is up).
+  window.startWatch = function(socketUrl) {
+    if (window._watching) return; window._watching = true; D.socket = socketUrl;
+    var tries = 0;
+    (function connect(){
+      try {
+        var ws = new WebSocket(D.socket);
+        ws.onopen = function(){ tries = 0; ws.send('watch ' + D.url); };
+        ws.onmessage = function(m){ if (String(m.data).indexOf('update') === 0) App.updated(D.url); };
+        ws.onclose = function(){ if (tries++ < 20) setTimeout(connect, Math.min(60000, 2000 * tries)); };
+      } catch (err) {}
+    })();
+  };
+  if (D.socket) window.startWatch(D.socket);
+  if (D.scrollY) window.scrollTo(0, D.scrollY);
+})();
+</script></body></html>

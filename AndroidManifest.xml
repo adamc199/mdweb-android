@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="fm.curry.mdweb" android:versionCode="3" android:versionName="1.2">
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="35"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <application android:label="MD Web" android:icon="@drawable/ic_launcher"
+        android:theme="@android:style/Theme.DeviceDefault.DayNight" android:allowBackup="true"
+        android:usesCleartextTraffic="true">
+        <activity android:name=".MainActivity" android:exported="true"
+            android:configChanges="orientation|screenSize|uiMode|keyboardHidden"
+            android:windowSoftInputMode="adjustResize" android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="*" android:pathPattern=".*\\.md"/>
+                <data android:scheme="http" android:host="*" android:pathPattern=".*\\.md"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

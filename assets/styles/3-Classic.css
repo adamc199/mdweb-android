@@ -1,0 +1,5 @@
+/* Classic: the old web. Times, blue links, white page. */
+body{font:17px/1.45 "Times New Roman",Times,serif;color:#000;background:#fff}
+a{color:#00e}a:visited{color:#551a8b}
+code,pre{font-family:"Courier New",monospace}
+blockquote{margin-left:24px}

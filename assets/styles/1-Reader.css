@@ -1,0 +1,8 @@
+/* Reader: the default. Calm sans, roomy, follows the phone's dark mode. */
+body{font:18px/1.6 system-ui,-apple-system,Roboto,sans-serif;color:#1d1d1f;background:#fbfbf9;max-width:42em;margin:0 auto}
+a{color:#0b62c4}
+h1,h2,h3{line-height:1.25}
+code,pre{font-family:ui-monospace,monospace;font-size:.88em;background:#efefeb}
+pre{padding:10px;border-radius:6px}
+blockquote{margin:0;padding-left:14px;border-left:3px solid #ccc;color:#555}
+@media (prefers-color-scheme:dark){body{color:#e6e6e3;background:#161616}a{color:#7ab4ff}code,pre{background:#262626}blockquote{border-color:#444;color:#aaa}}

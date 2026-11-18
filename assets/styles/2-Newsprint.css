@@ -1,0 +1,8 @@
+/* Newsprint: serif text on warm grey paper, tight like a column. */
+body{font:17px/1.5 Georgia,"Times New Roman",serif;color:#222;background:#f2efe6}
+h1{font-size:1.7em;border-bottom:2px solid #222;padding-bottom:4px}
+h1,h2,h3{font-family:Georgia,serif}
+a{color:#7a2e0e}
+code,pre{font-family:ui-monospace,monospace;font-size:.85em;background:#e7e2d4}
+pre{padding:8px}
+blockquote{margin:0 0 0 6px;padding-left:12px;border-left:2px solid #999;font-style:italic}

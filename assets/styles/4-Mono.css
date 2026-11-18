@@ -1,0 +1,8 @@
+/* Mono: a terminal. Green on near black, all monospace. */
+body{font:15px/1.55 ui-monospace,"DejaVu Sans Mono",monospace;color:#b7f5c0;background:#0d1110}
+a{color:#7fe3ff}
+h1,h2,h3{color:#e2ffe6;font-size:1.05em;text-transform:uppercase;letter-spacing:.05em}
+h1:before{content:"# "}h2:before{content:"## "}h3:before{content:"### "}
+code,pre{color:#ffe08a}
+blockquote{margin:0;padding-left:12px;border-left:2px solid #2e5a3a;color:#8fbf98}
+img{filter:grayscale(.3)}
